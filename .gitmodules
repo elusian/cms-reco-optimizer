@@ -1,0 +1,3 @@
+[submodule "The-Optimizer"]
+	path = The-Optimizer
+	url = git@github.com:cms-patatrack/The-Optimizer.git
