@@ -1,7 +1,15 @@
 <img width="1144" alt="Screenshot 2023-11-24 alle 09 46 27" src="https://github.com/cms-pixel-autotuning/CA-parameter-tuning/assets/16901146/5bee2244-9afc-46a2-99c6-a75705045442">
 
 
-This repo has a new `optimize_reco.py` script, modelled on top of `optimize.py`, thought to make the MOPSO work with a generic `cms-sw` reconstruction config in input. Given a list of modules we want to tune, a target we want to validate, and the parameters to tune, it automaically builds a `cmsRun` config derived from the input one that is ready to be run and "tuned" by the MOPSO.
+This repo has a new `optimize_reco.py` script, modelled on top of `optimize.py` from https://github.com/cms-patatrack/The-Optimizer/tree/main, thought as a wrapper to make the MOPSO work with a generic `cms-sw` reconstruction config in input. 
+
+As **first step** follow the instructions at https://github.com/cms-patatrack/The-Optimizer/tree/main and install it. Note that you may need to update your `PYTHONPATH` with
+
+```bash
+export PYTHONPATH="${PYTHONPATH}:PATH_TO_THEOPTIMIZER_REPO"
+```
+
+Then, given a list of modules we want to tune, a target we want to validate, and the parameters to tune, it automaically builds a `cmsRun` config derived from the input one that is ready to be run and "tuned" by the MOPSO.
 
 It works like this. Let's say we have a `step3_pixel.py` config that runs pixel tracking RECO (+VALIDATION). Could be the one generated with
 
