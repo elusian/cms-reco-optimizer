@@ -1,5 +1,6 @@
 #! /usr/bin/env python3
-from optimizer.mopso import MOPSO
+import optimizer
+from optimizer import MOPSO
 import subprocess
 import itertools
 from utils import get_metrics, write_csv, parseProcess, spinner, read_csv
@@ -34,11 +35,11 @@ if not is_continuing:
 ## Optimizer parameters
 parser.add_argument('-p', '--num_particles', default=100, type=int, action='store',help = "Number of agents to spawn by the MOPSO optimizer.")
 parser.add_argument('-i', '--num_iterations', default=100, type=int, action='store',help = "Number of iterations to be run by MOPSO optimizer.")
-parser.add_argument('-c', '--continuing', type=int, action='store')
+parser.add_argument('-c', '--continuing', type=str, default=None)
 parser.add_argument('-d', '--dir', type=str, action='store', help = "Directory where to continue.", required = is_continuing)  
 parser.add_argument('-b', '--bounds', nargs=2,help='Mins',default=(5,5))
 parser.add_argument('--check', action='store_true', help = "Run the config once before the optimizer.")
-
+parser.add_argument('--debug', action='store_true', help = "Debug printouts.")
 ## cmsRun parameters
 parser.add_argument('-t','--tune', nargs='+', help='List of modules to tune.', required = not is_continuing)
 parser.add_argument('-v','--validate', type=str, help='Target module to validate.', required = not is_continuing)
@@ -52,7 +53,7 @@ parser.add_argument('-T', '--timing', action='store_true', help = "Add timing/th
 args = parser.parse_args()
 
 # run pixel reconstruction and simple validation
-def reco_and_validate(params,config,iter,**kwargs):#,timing=False):
+def reco_and_validate(params,config,**kwargs):#,timing=False):
 
     workdir = os.getcwd() 
     num_particles = len(params)
@@ -67,7 +68,7 @@ def reco_and_validate(params,config,iter,**kwargs):#,timing=False):
     
 
     # redirecting outputs to logs
-    logfiles = tuple('%s/logs/%s_%d' % (workdir, name,iter) for name in ['process_last_out', 'process_last_err'])
+    logfiles = tuple('%s/logs/%s' % (workdir, name) for name in ['process_last_out', 'process_last_err'])
     stdout = open(logfiles[0], 'w')
     stderr = open(logfiles[1], 'w')
 
@@ -79,16 +80,6 @@ def reco_and_validate(params,config,iter,**kwargs):#,timing=False):
 
     return population_fitness
   
-# # create the PSO object
-# if not args.continuing:
-#     #os.system('rm history/*')
-#     pso = MOPSO(objective_functions=[reco_and_validate],lower_bounds=lb, upper_bounds=ub, 
-#                 num_objectives=2, num_particles=args.num_particles, num_iterations=args.num_iterations,  
-#                 max_iter_no_improv=None, optimization_mode='global')
-# else:
-#     pso = MOPSO(objective_functions=[reco_and_validate],lower_bounds=lb, upper_bounds=ub, 
-#                 num_iterations=args.continuing, checkpoint_dir='checkpoint')
-
 def print_headers(x):
     print(colored(x,"green",attrs=['bold']))
 def print_subheaders(x):
@@ -122,17 +113,24 @@ if __name__ == "__main__":
     config_to_run = 'process_to_run.py'
     config_to_graph = 'process_zero.py'
 
-    if args.continuing:
+    
+    optimizer.FileManager.saving_enabled = True
+    objective = optimizer.Objective(objective_functions=partial(reco_and_validate, config = config_to_run),num_objectives=2)
+    loglevel = 'DEBUG' if args.debug else 'INFO'
+    optimizer.Logger.setLevel(loglevel)
+
+    if args.continuing is not None:
+
+        optimizer.FileManager.working_dir = args.dir + "/checkpoint/"
+        optimizer.FileManager.loading_enabled = True
+
         os.chdir(args.dir)
         print_headers("> Continuing the optimization in folder: %s"%args.dir)
 
         n_particles = len(read_csv("temp/parameters.csv"))
-        objective = partial(reco_and_validate, config = config_to_run)
-        pso = MOPSO(objective_functions=[objective],
-                    lower_bounds=read_csv("lb.csv")[0], upper_bounds=read_csv("ub.csv"), 
-                    num_iterations=args.continuing, 
-                    checkpoint_dir='checkpoint')
-        pso.optimize(history_dir= 'history', checkpoint_dir='checkpoint')
+        pso = MOPSO(objective=objective,
+                    lower_bounds=read_csv("lb.csv")[0], upper_bounds=read_csv("ub.csv"))
+        pso.optimize(num_iterations=args.num_iterations)
         sys.exit(0)
     
     config_input = args.config
@@ -140,12 +138,17 @@ if __name__ == "__main__":
 
     copy_to_unique(config_input)
     workdir = os.getcwd()
+    checkdir = workdir + '/checkpoint/'
+    if not os.path.exists(checkdir):
+        os.mkdir(checkdir)
+
+    optimizer.FileManager.working_dir = checkdir
 
     modules_to_tune = args.tune
     module_to_valid = args.validate
 
     print_headers("> Running optimizer on the config: %s"%repr(config_input))
-    print_warnings("> Working dir: %s"%workdir)
+    print_headers("> Working dir: %s"%workdir)
     print("> > Module(s) to tune\t:",repr(modules_to_tune))
     print("> > Module to validate\t:",module_to_valid)
     print("> > Input file(s)\t:",input_files)
@@ -194,7 +197,7 @@ if __name__ == "__main__":
         params = args.pars
         with open('params_to_run.csv',"w") as file:
             file.write("%s"%",".join(args.pars))
-        print("> > Read in input:",params,"( saved in params_to_run.csv)")
+        print("> > Read in input:",params,"(saved in params_to_run.csv)")
 
     # Handling parameter values in input
     ##TODO add a check on bounds being well ordered (min < max)
@@ -206,8 +209,9 @@ if __name__ == "__main__":
         if k in params_dict:
             default_values[k] = params_dict[k].value() # underlying object wrapped in cms type
         else:
-            print_warnings("WARNING: Parameter %s does not exist in module %s!"%(k,modules_to_tune[0]))
-
+            print_warnings("WARNING: Parameter %s does not exist in module %s! The available parameters are:"%(k,modules_to_tune[0]))
+            print_warnings(list(params_dict.keys()))
+    print(params_dict)
     if(len(default_values) < 1):
         sys.exit("Error: in module %s none of the parameters %s was found! Aborting."%(modules_to_tune[0],params))
     print_subheaders("> > Default values: ")
@@ -225,7 +229,7 @@ if __name__ == "__main__":
         else:
             w = float(w)
             m = w if b=="High" else 1./w
-            params_bounds[b] = {k: np.multiply(v,m).astype(type(v[0])).tolist() if hasattr(v, "__len__") else type(v)(v*m) for k,v in default_values.items()  }
+            params_bounds[b] = {k: np.multiply(v,m).astype(type(v[0])).tolist() if hasattr(v, "__len__") else type(v)(float(v)*m) for k,v in default_values.items()  }
             print("> > From input (factor=%.3f):"%m)
             print_bounds(params_bounds[b])
         sys.stdout.write("\r")
@@ -274,7 +278,7 @@ if __name__ == "__main__":
     
     if args.check:
         print_headers("> Running once with %d events to test"%args.num_events)
-        logfiles = tuple('%s/logs/%s' % (workdir, name) for name in ['process_one_out', 'process_one_err'])
+        logfiles = tuple('%s/logs/%s' % (workdir, name) for name in ['process_check_out', 'process_check_err'])
         with open(logfiles[0], 'w') as stdout, open(logfiles[1], 'w') as stderr:
             write_csv("default_values.csv",dv)
             job = subprocess.Popen(['cmsRun', config_to_run, "parametersFile=default_values.csv"], cwd=workdir, stderr=stderr, stdout=stdout)
@@ -284,12 +288,10 @@ if __name__ == "__main__":
     print("> > Number of agents    :",args.num_particles)
     print("> > Number of iterations:",args.num_iterations)
 
-    objective = partial(reco_and_validate, config = config_to_run)
-    pso = MOPSO(objective_functions=[objective],lower_bounds=lb, upper_bounds=ub, 
-                num_objectives=2, num_particles=args.num_particles, num_iterations=args.num_iterations,  
-                max_iter_no_improv=None, optimization_mode='global')
-
-    pso.optimize(history_dir='history', checkpoint_dir='checkpoint')
+    pso = MOPSO(objective=objective,lower_bounds=lb, upper_bounds=ub, 
+                num_particles=args.num_particles)
+    
+    pso.optimize(num_iterations=args.num_iterations)
 
     
     
