@@ -8,6 +8,7 @@ As **first step** follow the instructions at https://github.com/cms-patatrack/Th
 ```bash
 export PYTHONPATH="${PYTHONPATH}:PATH_TO_THEOPTIMIZER_REPO"
 ```
+You can also source the `extra_setup.sh` once you have created your CMSSW environment.
 
 Then, given a list of modules we want to tune, a target we want to validate, and the parameters to tune, it automaically builds a `cmsRun` config derived from the input one that is ready to be run and "tuned" by the MOPSO.
 
