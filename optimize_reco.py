@@ -23,35 +23,6 @@ from datetime import datetime
 
 import FWCore.ParameterSet.Config as cms
 
-# parsing argument
-parser = argparse.ArgumentParser()
-
-allowed_recos = ("tracks","hgcal")
-
-is_continuing = '--continuing' in sys.argv
-
-if not is_continuing:
-    parser.add_argument('config', help = "Config to tune.")
-## Optimizer parameters
-parser.add_argument('-p', '--num_particles', default=100, type=int, action='store',help = "Number of agents to spawn by the MOPSO optimizer.")
-parser.add_argument('-i', '--num_iterations', default=100, type=int, action='store',help = "Number of iterations to be run by MOPSO optimizer.")
-parser.add_argument('-c', '--continuing', type=str, default=None)
-parser.add_argument('-d', '--dir', type=str, action='store', help = "Directory where to continue.", required = is_continuing)  
-parser.add_argument('-b', '--bounds', nargs=2,help='Mins',default=(5,5))
-parser.add_argument('--check', action='store_true', help = "Run the config once before the optimizer.")
-parser.add_argument('--debug', action='store_true', help = "Debug printouts.")
-## cmsRun parameters
-parser.add_argument('-t','--tune', nargs='+', help='List of modules to tune.', required = not is_continuing)
-parser.add_argument('-v','--validate', type=str, help='Target module to validate.', required = not is_continuing)
-parser.add_argument('--pars', nargs='+', help='Parameters to tune. \n These may be given as a list of parameters names or a file with the names separated by a ",".', required = not is_continuing)
-parser.add_argument('-j', '--num_threads', default=8, type=int, action='store')
-parser.add_argument('-e', '--num_events', default=100, type=int, action='store')
-parser.add_argument('-f', '--input_file', nargs='+', default=["file:step2.root"])
-parser.add_argument('--reco', nargs='?', choices=allowed_recos,help='Type of reco to be run %s.'%repr(allowed_recos)) # to be implemented
-parser.add_argument('-T', '--timing', action='store_true', help = "Add timing/throughput for the pareto front.")
-
-args = parser.parse_args()
-
 # run pixel reconstruction and simple validation
 def reco_and_validate(params,config,**kwargs):#,timing=False):
 
@@ -73,7 +44,10 @@ def reco_and_validate(params,config,**kwargs):#,timing=False):
     stderr = open(logfiles[1], 'w')
 
     command = ['cmsRun',config,'parametersFile=temp/parameters.csv', 'outputFile=' + validation_result]    
-    subprocess.run(command,stdout = stdout, stderr = stderr)
+    result = subprocess.run(command,stdout = stdout, stderr = stderr)
+
+    if result.returncode != 0:
+        raise RuntimeError("Failed to run validation process")
     
     with uproot.open(validation_result) as uproot_file:
         population_fitness = [get_metrics(uproot_file, i) for i in range(num_particles)]
@@ -94,10 +68,13 @@ def print_logo():
     f= open ('logo.txt','r')
     print(''.join([line for line in f]))
 
-def copy_to_unique(c):
+def copy_to_unique(c, override = None):
 
     formatted_date = datetime.now().strftime("%Y%m%d.%H%M%S")
-    b = "./optimize."+c.replace(".py","")+"_"+formatted_date #str(random.getrandbits(64))
+    if override is None:
+        b = "./optimize."+c.replace(".py","")+"_"+formatted_date #str(random.getrandbits(64))
+    else:
+        b = override
     os.mkdir(b)
     shutil.copy(c,b+"/"+c)
     shutil.copy("utils.py",b)
@@ -106,6 +83,35 @@ def copy_to_unique(c):
     
 
 if __name__ == "__main__":
+    # parsing argument
+    parser = argparse.ArgumentParser()
+
+    allowed_recos = ("tracks","hgcal")
+
+    is_continuing = '--continuing' in sys.argv or '-c' in sys.argv
+
+    if not is_continuing:
+        parser.add_argument('config', help = "Config to tune.")
+    ## Optimizer parameters
+    parser.add_argument('-p', '--num_particles', default=100, type=int, action='store',help = "Number of agents to spawn by the MOPSO optimizer.")
+    parser.add_argument('-i', '--num_iterations', default=100, type=int, action='store',help = "Number of iterations to be run by MOPSO optimizer.")
+    parser.add_argument('-c', '--continuing', action = 'store_true', default=None)
+    parser.add_argument('-d', '--dir', type=str, action='store', help = "Directory where to continue.", required = is_continuing)
+    parser.add_argument('-b', '--bounds', nargs=2,help='Mins',default=(5,5))
+    parser.add_argument('--check', action='store_true', help = "Run the config once before the optimizer.")
+    parser.add_argument('--debug', action='store_true', help = "Debug printouts.")
+    ## cmsRun parameters
+    parser.add_argument('-t','--tune', nargs='+', help='List of modules to tune.', required = not is_continuing)
+    parser.add_argument('-v','--validate', type=str, help='Target module to validate.', required = not is_continuing)
+    parser.add_argument('--associator-task', type = str, help = 'Task to be used for the association')
+    parser.add_argument('--pars', nargs='+', help='Parameters to tune. \n These may be given as a list of parameters names or a file with the names separated by a ",".', required = not is_continuing)
+    parser.add_argument('-j', '--num_threads', default=8, type=int, action='store')
+    parser.add_argument('-e', '--num_events', default=100, type=int, action='store')
+    parser.add_argument('-f', '--input_file', nargs='+', default=["file:step2.root"])
+    parser.add_argument('--reco', nargs='?', choices=allowed_recos,help='Type of reco to be run %s.'%repr(allowed_recos)) # to be implemented
+    parser.add_argument('-T', '--timing', action='store_true', help = "Add timing/throughput for the pareto front.")
+
+    args = parser.parse_args()
     
     print_logo()
     input_files = [ "file:" + os.path.abspath(f[5:]) if f.startswith("file:") else f for f in args.input_file ]
@@ -119,12 +125,14 @@ if __name__ == "__main__":
     loglevel = 'DEBUG' if args.debug else 'INFO'
     optimizer.Logger.setLevel(loglevel)
 
-    if args.continuing is not None:
-
-        optimizer.FileManager.working_dir = args.dir + "/checkpoint/"
-        optimizer.FileManager.loading_enabled = True
+    if args.continuing:
 
         os.chdir(args.dir)
+
+        workdir = os.getcwd()
+        optimizer.FileManager.working_dir = workdir + "/checkpoint/"
+        optimizer.FileManager.loading_enabled = True
+
         print_headers("> Continuing the optimization in folder: %s"%args.dir)
 
         n_particles = len(read_csv("temp/parameters.csv"))
@@ -136,7 +144,7 @@ if __name__ == "__main__":
     config_input = args.config
     ## Move to the new hashed folder
 
-    copy_to_unique(config_input)
+    copy_to_unique(config_input, override = args.dir)
     workdir = os.getcwd()
     checkdir = workdir + '/checkpoint/'
     if not os.path.exists(checkdir):
@@ -250,6 +258,7 @@ if __name__ == "__main__":
     # Dumping lower bounds and upper bounds for "continuing option"
     write_csv("lb.csv",lb)
     write_csv("ub.csv",ub)
+    write_csv("dv.csv",dv)
 
     with open(config_to_run, 'w') as new:
         
@@ -260,6 +269,9 @@ if __name__ == "__main__":
         ## input config to run
         with open(config_input) as add:
             new.write(add.read())
+
+        if args.associator_task is not None:
+            new.write(f'associator_task = process.{args.associator_task}')
         
         ## footer with the customization for the optimizer
         with open(start_dir+'/footer.py') as add:
@@ -280,9 +292,11 @@ if __name__ == "__main__":
         print_headers("> Running once with %d events to test"%args.num_events)
         logfiles = tuple('%s/logs/%s' % (workdir, name) for name in ['process_check_out', 'process_check_err'])
         with open(logfiles[0], 'w') as stdout, open(logfiles[1], 'w') as stderr:
-            write_csv("default_values.csv",dv)
-            job = subprocess.Popen(['cmsRun', config_to_run, "parametersFile=default_values.csv"], cwd=workdir, stderr=stderr, stdout=stdout)
+            write_csv("dv.csv",dv)
+            job = subprocess.Popen(['cmsRun', config_to_run, "parametersFile=dv.csv"], cwd=workdir, stderr=stderr, stdout=stdout)
             job.communicate()
+
+        # sys.exit(0)
     
     print_headers("> Ready to go, running the optimizer!")
     print("> > Number of agents    :",args.num_particles)

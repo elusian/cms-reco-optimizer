@@ -1,5 +1,5 @@
 
-export PYTHONPATH=${PYTHONPATH}:$PWD/The-Optimizer  
+# export PYTHONPATH=${PYTHONPATH}:$PWD/The-Optimizer
 
 cd $CMSSW_BASE/src
 cmsenv

@@ -32,6 +32,8 @@ def get_metrics(uproot_file, id):
     total_ass_sim = tree['ast'].array()[0]
     total_dup = tree['dt'].array()[0]
     total_sim = tree['st'].array()[0]
+
+    #print(f'{id}:', total_rec, total_ass, total_sim, total_ass_sim, total_dup)
     
     if not total_ass or not total_rec or not total_sim or not total_ass_sim:
         return [1.0] * 2
@@ -117,17 +119,20 @@ def remove_outputs(process):
 
     return process
 
-def add_validation(process,inputs,target):
+def add_validation(process,inputs,target, task = None):
 
     # Here we assume that the process we have given in input has already the 
     # validation and the prevalidation well defined and so we just track
     # back wich hit associator we need to use
+
     hitassoc = ""
     for f in modules_by_type(process,"TrackAssociatorEDProducer"):
         #print(getattr(f,"label_tr"))
         if getattr(f,"label_tr").value() == target:
             hitassoc = getattr(f,"associator").value()
             break
+
+    print('Found associator', hitassoc)
     
     taskList = []
     for i,_ in enumerate(inputs):
@@ -139,26 +144,26 @@ def add_validation(process,inputs,target):
                 intimeOnlyTP = cms.bool(False),
                 invertRapidityCutTP = cms.bool(False),
                 lipTP = cms.double(30.0),
-                maxPhi = cms.double(3.2),
-                maxRapidityTP = cms.double(2.5),
+                maxPhiTP = cms.double(3.2),
+                maxRapidityTP = cms.double(3),#(2.5),
                 minHitTP = cms.int32(0),
-                minPhi = cms.double(-3.2),
-                minRapidityTP = cms.double(-2.5),
+                minPhiTP = cms.double(-3.2),
+                minRapidityTP = cms.double(-3),#(-2.5),
                 pdgIdTP = cms.vint32(),
                 ptMaxTP = cms.double(1e+100),
                 ptMinTP = cms.double(0.9),
                 signalOnlyTP = cms.bool(True),
                 stableOnlyTP = cms.bool(False),
-                tipTP = cms.double(3.5),
+                tipTP = cms.double(60),#(3.5),
                 trackLabels = cms.VInputTag(target + str(i)),
                 trackAssociator = cms.untracked.InputTag(hitassoc),
-                trackingParticles = cms.InputTag('mix', 'MergedTrackTruth')               
+                trackingParticles = cms.InputTag('mix', 'MergedTrackTruth')
             )
         )
 
         taskList.append(getattr(process, name))
 
-    process.simpleValidationSeq = cms.Sequence(sum(taskList[1:],taskList[0]))
+    process.simpleValidationSeq = cms.Sequence(sum(taskList[1:],taskList[0])) if task is None else cms.Sequence(sum(taskList[1:],taskList[0]), task)
     process.simpleValidationPath = cms.EndPath(process.simpleValidationSeq)
     process.schedule.extend([process.simpleValidationPath])
 
@@ -167,31 +172,37 @@ def add_validation(process,inputs,target):
 def modules_tuning(process,inputs,params,tune):
     
     for i, row in enumerate(inputs):
+        # print("Param row", i, "is", row)
         modules_to_tune = [getattr(process,t).clone() for t in tune]
         enum_p = iter(enumerate(params))
         n = 0
         for p in params:
-            for m in modules_to_tune:
+            # print("Setting parameter", p)
+            for name, m in zip(tune,modules_to_tune):
+                # print("For module", name)
                 this_params = m.parameters_()
                 if p in this_params:
                     par = this_params[p]
+                    # print("Standard param is", par)
                     if is_v_input(type(par)):
                         l = len(par.value())
                         setattr(m,p,[int(row[n+i]) for i in range(l)])
+                        # print("Setting to", [int(row[n+i]) for i in range(l)])
                     else:
                         l = 1
                         setattr(m,p,row[n])
-            n = n + 1
+                        # print("Setting to", row[n])
+            n = n + l
         for n,m in zip(tune,modules_to_tune):
             setattr(process,n+str(i),m)
         
     return process
    
-def expand_process(process,inputs,params,tune,chain,target):
+def expand_process(process,inputs,params,tune,chain,target, task):
     
-    process = remove_outputs(process) #check for all EndPaths 
+    process = remove_outputs(process) #check for all EndPaths
     process = modules_tuning(process,inputs,params,tune)
-    process = add_validation(process,inputs,target)
+    process = add_validation(process,inputs,target, task)
     process = chain_update(process,inputs,tune,chain+[target])
     
 
