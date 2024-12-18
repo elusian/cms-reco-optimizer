@@ -10,3 +10,5 @@ options.register('parametersFile',
               'Name of parameters file')
 options.parseArguments()
 inputs = read_csv(options.parametersFile)
+
+associator_task = None
